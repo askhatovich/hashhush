@@ -37,7 +37,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
               build-essential cmake pkg-config git ca-certificates curl \
-              libsqlite3-dev nodejs npm dpkg-dev
+              libsqlite3-dev libasio-dev nodejs npm dpkg-dev
 
       - uses: actions/checkout@v4
         with:
