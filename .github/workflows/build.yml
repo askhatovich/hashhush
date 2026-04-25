@@ -26,15 +26,19 @@ jobs:
           cache: 'npm'
           cache-dependency-path: web/package-lock.json
 
+      # CMake configure must run before the frontend build because it
+      # materialises web/src/version.js (and src/version.h) via configure_file
+      # from .in templates. Without it, the Svelte build can't resolve the
+      # `import { VERSION } from '../version.js'` in Footer.svelte.
+      - name: Configure (generates version.{js,h})
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
       - name: Build frontend bundle
         working-directory: web
         run: |
           npm ci --ignore-scripts
           npm run build
           bash embed.sh
-
-      - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build backend
         run: cmake --build build -j"$(nproc)"

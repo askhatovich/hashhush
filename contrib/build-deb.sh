@@ -17,6 +17,19 @@ STAGE_DIR="$(mktemp -d)"
 
 trap 'rm -rf "$STAGE_DIR"' EXIT
 
+# --- Configure backend (generates version.{js,h} for the frontend) ---------
+#
+# CMake's configure step materialises web/src/version.js via configure_file
+# from version.js.in. The frontend bundler imports it, so the configure must
+# come BEFORE `npm run build`.
+
+echo "==> Configuring $PKG_NAME $PKG_VERSION ($PKG_ARCH) ..."
+
+# APP_VERSION is read by src/CMakeLists.txt as the canonical version source.
+APP_VERSION="$PKG_VERSION" cmake -B "$BUILD_DIR" \
+    -DCMAKE_BUILD_TYPE=Release \
+    "$PROJECT_DIR"
+
 # --- Build frontend ---------------------------------------------------------
 
 if [ -d "$PROJECT_DIR/web" ] && [ -f "$PROJECT_DIR/web/package.json" ]; then
@@ -28,15 +41,9 @@ if [ -d "$PROJECT_DIR/web" ] && [ -f "$PROJECT_DIR/web/package.json" ]; then
     cd "$PROJECT_DIR"
 fi
 
-# --- Build backend ----------------------------------------------------------
+# --- Build backend (with the embedded frontend) -----------------------------
 
-echo "==> Building $PKG_NAME $PKG_VERSION ($PKG_ARCH) ..."
-
-# APP_VERSION is read by src/CMakeLists.txt as the canonical version source.
-APP_VERSION="$PKG_VERSION" cmake -B "$BUILD_DIR" \
-    -DCMAKE_BUILD_TYPE=Release \
-    "$PROJECT_DIR"
-
+echo "==> Building binary ..."
 APP_VERSION="$PKG_VERSION" cmake --build "$BUILD_DIR" -j"$(nproc)"
 
 # --- Stage ------------------------------------------------------------------
