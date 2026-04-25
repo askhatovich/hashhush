@@ -1,0 +1,11 @@
+.env
+build/
+build-*/
+web/node_modules/
+web/dist/
+web/src/version.js
+src/generated_index_html.h
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.deb

@@ -1,0 +1,127 @@
+/* hashhush — global styles. Dark default; .light overrides on documentElement. */
+
+:root {
+    --bg:           #0f1117;
+    --bg-elev:      #161a23;
+    --bg-elev-2:    #1d2230;
+    --border:       #262c3b;
+    --text:         #e7e9ee;
+    --text-dim:     #9aa1b1;
+    --accent:       #7dd3c0;
+    --accent-press: #5fb6a3;
+    --danger:       #ef6671;
+    --danger-press: #d24c57;
+    --shadow:       0 4px 24px rgba(0, 0, 0, 0.35);
+    --radius:       10px;
+    --mono:         ui-monospace, 'SFMono-Regular', 'JetBrains Mono', 'Menlo', monospace;
+    --sans:         -apple-system, 'Segoe UI', Inter, Roboto, system-ui, sans-serif;
+}
+
+:root.light {
+    --bg:           #f7f8fb;
+    --bg-elev:      #ffffff;
+    --bg-elev-2:    #eef0f5;
+    --border:       #dde1ea;
+    --text:         #14161c;
+    --text-dim:     #5a6172;
+    --accent:       #2e9e8c;
+    --accent-press: #1f8273;
+    --danger:       #c8404a;
+    --danger-press: #a4313a;
+    --shadow:       0 4px 24px rgba(20, 22, 28, 0.08);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
+body { min-height: 100dvh; }
+
+input, textarea, button {
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+}
+
+input, textarea {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    width: 100%;
+    color: var(--text);
+    transition: border-color 0.12s ease;
+}
+input:focus, textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+button {
+    background: var(--accent);
+    color: #0a1614;
+    border: 0;
+    border-radius: var(--radius);
+    padding: 10px 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.12s ease, opacity 0.12s ease;
+}
+button:hover { background: var(--accent-press); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button.ghost {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+}
+button.ghost:hover { background: var(--bg-elev-2); }
+button.danger { background: var(--danger); color: #fff; }
+button.danger:hover { background: var(--danger-press); }
+
+.mono { font-family: var(--mono); }
+.dim  { color: var(--text-dim); }
+
+.app-shell {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 16px 32px;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+}
+/* Chat route: pin the chat block to one viewport, push the footer below
+   the fold so the page only scrolls vertically to reveal it. The chat
+   itself owns its inner scroll on the message list. */
+.app-shell.chat-mode {
+    padding-top: 0;
+    padding-bottom: 0;
+}
+.app-shell.chat-mode > section.chat {
+    height: 100dvh;
+    flex: none;
+    padding: 12px 0;
+}
+
+.field { margin-bottom: 14px; }
+.field label {
+    display: block;
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+}
+
+@keyframes fade-in {
+    from { opacity: 0; transform: translateY(2px); }
+    to   { opacity: 1; transform: none; }
+}

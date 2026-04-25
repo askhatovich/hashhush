@@ -1,0 +1,188 @@
+<script>
+    import { t, lang } from '../lib/i18n.js';
+    import { api } from '../lib/api.js';
+    import { storage } from '../lib/storage.js';
+    import { generateKeySeed, deriveKey, encrypt, randomBytes, toB64 } from '../lib/crypto.js';
+    import { randomNickname } from '../lib/words.js';
+
+    let { initialError = null, appName = 'HashHush', info = null, onCreated } = $props();
+
+    let nickname = $state(storage.getNickname() || randomNickname());
+    let roomName = $state('');
+    let busy = $state(false);
+    let error = $state(initialError ? `errors.${initialError}` : null);
+
+    $effect(() => { if (nickname) storage.setNickname(nickname); });
+
+    // Russian uses three plural forms (one/few/many); English uses two.
+    // Pick the matching word so we render "1 день" / "2 дня" / "5 дней"
+    // and "1 day" / "2 days" rather than the abbreviated "1 д".
+    function pluralKey(n) {
+        if ($lang === 'ru') {
+            const mod10 = n % 10, mod100 = n % 100;
+            if (mod10 === 1 && mod100 !== 11) return 'one';
+            if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'few';
+            return 'many';
+        }
+        return n === 1 ? 'one' : 'many';
+    }
+
+    function unitWord(unit, n) {
+        return $t(`home.unit_${unit}_${pluralKey(n)}`);
+    }
+
+    function formatTtl(seconds) {
+        // Pick the coarsest readable unit so the home page reads naturally
+        // ("1 day" / "12 hours") rather than "86400 seconds".
+        if (seconds % 86400 === 0) {
+            const n = seconds / 86400;
+            return `${n} ${unitWord('day', n)}`;
+        }
+        if (seconds >= 3600) {
+            const n = Math.round(seconds / 3600);
+            return `${n} ${unitWord('hour', n)}`;
+        }
+        const n = Math.max(1, Math.round(seconds / 60));
+        return `${n} ${unitWord('minute', n)}`;
+    }
+
+    async function create() {
+        if (busy) return;
+        busy = true;
+        error = null;
+        try {
+            const created = await api.createRoom(roomName.trim() || 'Secret chat');
+            const seed = generateKeySeed();
+            const key = await deriveKey(seed);
+
+            const challenges = [];
+            for (let i = 0; i < created.challenges_required; ++i) {
+                const plaintext = await randomBytes(32);
+                const { nonce, ciphertext } = await encrypt(plaintext, key);
+                challenges.push({
+                    plaintext:  await toB64(plaintext),
+                    ciphertext: await toB64(ciphertext),
+                    nonce:      await toB64(nonce)
+                });
+            }
+            await api.activateRoom(created.room_id, challenges);
+
+            // Don't persist the seed; it stays in the URL fragment only.
+            // Path stays "/" — both room id and seed live in the fragment.
+            history.replaceState(null, '', `/#${created.room_id}:${seed}`);
+            onCreated && onCreated({ roomId: created.room_id, seed, freshlyCreated: true });
+        } catch (e) {
+            error = `errors.${e.code || 'internal'}`;
+        } finally {
+            busy = false;
+        }
+    }
+</script>
+
+<section class="home">
+    <header class="hero">
+        <h1 class="title">{appName}</h1>
+        <p class="subtitle dim">{$t('home.subtitle')}</p>
+    </header>
+
+    <div class="card">
+        <div class="field">
+            <label for="room">{$t('home.room_name')}</label>
+            <input id="room" type="text" placeholder={$t('home.room_name_placeholder')} bind:value={roomName} maxlength="80" />
+        </div>
+
+        <div class="field">
+            <label for="nick">{$t('home.nickname')}</label>
+            <input id="nick" type="text" bind:value={nickname} maxlength="40" />
+        </div>
+
+        {#if error}<p class="error">{$t(error)}</p>{/if}
+
+        <button class="primary" onclick={create} disabled={busy}>
+            {busy ? $t('home.creating') : $t('home.create')}
+        </button>
+    </div>
+
+    {#if info}
+        <ul class="policy dim">
+            <li>{$t('home.info_max').replace('{count}', info.default_max_participants)}</li>
+            <li>{$t('home.info_ttl').replace('{duration}', formatTtl(info.idle_ttl_seconds))}</li>
+            <li>{$t('home.info_cache').replace('{count}', info.message_cache_size)}</li>
+        </ul>
+    {/if}
+
+    <p class="privacy dim">{$t('home.privacy_note')}</p>
+</section>
+
+<style>
+    .home {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 28px;
+    }
+
+    /* Hero */
+    .hero {
+        text-align: center;
+        padding-top: 8px;
+    }
+    .title {
+        font-size: 34px;
+        line-height: 1.1;
+        letter-spacing: -0.02em;
+        margin: 0 0 6px;
+    }
+    .subtitle {
+        margin: 0 auto;
+        max-width: 460px;
+        font-size: 14px;
+    }
+
+    /* Form card */
+    .card {
+        background: var(--bg-elev);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 18px;
+        box-shadow: var(--shadow);
+    }
+    .card .field { margin-bottom: 12px; }
+    .card .primary {
+        width: 100%;
+        padding: 12px 16px;
+        font-size: 15px;
+        margin-top: 4px;
+    }
+
+    /* Policy facts */
+    .policy {
+        list-style: none;
+        margin: 0;
+        padding: 0 4px;
+        font-size: 12px;
+        line-height: 1.7;
+    }
+    .policy li::before {
+        content: '·';
+        margin-right: 6px;
+        opacity: 0.55;
+    }
+
+    .privacy {
+        text-align: center;
+        font-size: 12px;
+        margin: 4px 0 0;
+    }
+
+
+    .error {
+        background: rgba(239, 102, 113, 0.08);
+        border: 1px solid rgba(239, 102, 113, 0.4);
+        color: var(--danger);
+        padding: 10px 12px;
+        border-radius: var(--radius);
+        margin: 0 0 12px;
+        font-size: 14px;
+    }
+</style>

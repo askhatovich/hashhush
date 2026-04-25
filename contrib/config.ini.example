@@ -1,0 +1,26 @@
+[server]
+; Log level: verbose, debug, info, warning, error, fatal, none
+log_level = info
+bind_address = 0.0.0.0
+bind_port = 8080
+; Brand name shown on the home page heading and in the footer link.
+app_name = HashHush
+
+[storage]
+; Path to the SQLite database file.
+db_path = /var/lib/hashhush/hashhush.sqlite
+
+[room]
+; Default and absolute upper bound for max participants per room.
+default_max_participants = 10
+max_participants_cap = 50
+; Idle TTL — a room with no activity for this many seconds is purged.
+idle_ttl_seconds = 86400
+; Total number of rooms allowed on this instance (0 = unlimited).
+total_rooms_cap = 0
+; Number of recent encrypted messages cached and replayed to new joiners.
+message_cache_size = 5
+; Maximum WebSocket payload (bytes, after base64).
+ws_max_payload_bytes = 8192
+; Maximum challenge plaintext / ciphertext size (bytes).
+challenge_max_blob_bytes = 256

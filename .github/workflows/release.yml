@@ -1,0 +1,94 @@
+name: release
+
+# Triggered on tags vX.Y.Z. Builds .deb packages for Debian 12 (bookworm) and
+# Debian 13 (trixie) inside the corresponding base images and attaches both
+# artifacts to a GitHub release named after the tag.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write    # required for uploading release assets
+
+jobs:
+  build-deb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - debian: '12'
+            codename: 'bookworm'
+            image: 'debian:12'
+          - debian: '13'
+            codename: 'trixie'
+            image: 'debian:13'
+
+    container:
+      image: ${{ matrix.image }}
+
+    steps:
+      - name: Install build dependencies (apt)
+        run: |
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+              build-essential cmake pkg-config git ca-certificates curl \
+              libsqlite3-dev nodejs npm dpkg-dev
+
+      - uses: actions/checkout@v4
+        with:
+          # Need full history for `git describe --tags`.
+          fetch-depth: 0
+
+      - name: Mark workspace as a safe git directory
+        # The container runs as root while the checkout is owned by the
+        # runner user; git refuses to operate on a "dubious-ownership"
+        # repo without this exception.
+        run: git config --global --add safe.directory "$PWD"
+
+      - name: Derive package version from tag
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "version=$TAG"          >> "$GITHUB_OUTPUT"
+          echo "Building version: $TAG"
+
+      - name: Build .deb
+        env:
+          APP_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -eux
+          bash contrib/build-deb.sh "${{ steps.ver.outputs.version }}"
+          # Rename so the artifact carries the target distro in its name.
+          ARCH=$(dpkg --print-architecture)
+          mv "hashhush_${{ steps.ver.outputs.version }}_${ARCH}.deb" \
+             "hashhush_${{ steps.ver.outputs.version }}_debian${{ matrix.debian }}_${ARCH}.deb"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hashhush-debian${{ matrix.debian }}
+          path: hashhush_*_debian${{ matrix.debian }}_*.deb
+          retention-days: 14
+
+  publish-release:
+    needs: build-deb
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List collected artifacts
+        run: ls -la artifacts/
+
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.deb
+          generate_release_notes: true

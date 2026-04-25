@@ -1,0 +1,25 @@
+[Unit]
+Description=HashHush — ephemeral end-to-end encrypted group chat
+After=network.target
+
+[Service]
+Type=simple
+User=hashhush
+Group=hashhush
+ExecStartPre=/bin/sh -c 'test -f /etc/hashhush/config.ini || /usr/bin/hashhush --generate-config /etc/hashhush/config.ini'
+ExecStart=/usr/bin/hashhush --config /etc/hashhush/config.ini
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ReadWritePaths=/etc/hashhush /var/lib/hashhush
+
+[Install]
+WantedBy=multi-user.target
