@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS rooms (
     max_participants   INTEGER NOT NULL,
     created_at         INTEGER NOT NULL,
     last_active_at     INTEGER NOT NULL,
-    activated          INTEGER NOT NULL DEFAULT 0
+    activated          INTEGER NOT NULL DEFAULT 0,
+    requires_password  INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS challenges (
@@ -82,15 +83,16 @@ bool Database::createRoom(const RoomRow& room) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
     sqlite3_prepare_v2(db_,
-        "INSERT INTO rooms (id, name, max_participants, created_at, last_active_at, activated) "
-        "VALUES (?, ?, ?, ?, ?, ?)", -1, &st, nullptr);
+        "INSERT INTO rooms (id, name, max_participants, created_at, last_active_at, activated, requires_password) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)", -1, &st, nullptr);
     bindText(st, 1, room.id);
     bindText(st, 2, room.name);
     sqlite3_bind_int  (st, 3, room.maxParticipants);
     sqlite3_bind_int64(st, 4, room.createdAt);
     sqlite3_bind_int64(st, 5, room.lastActiveAt);
     sqlite3_bind_int  (st, 6, room.activated ? 1 : 0);
-    bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_bind_int  (st, 7, room.requiresPassword ? 1 : 0);
+    const bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     return ok;
 }
@@ -99,7 +101,7 @@ std::optional<RoomRow> Database::findRoom(const std::string& id) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
     sqlite3_prepare_v2(db_,
-        "SELECT id, name, max_participants, created_at, last_active_at, activated "
+        "SELECT id, name, max_participants, created_at, last_active_at, activated, requires_password "
         "FROM rooms WHERE id = ?", -1, &st, nullptr);
     bindText(st, 1, id);
     std::optional<RoomRow> result;
@@ -107,10 +109,11 @@ std::optional<RoomRow> Database::findRoom(const std::string& id) {
         RoomRow r;
         r.id   = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
         r.name = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
-        r.maxParticipants = sqlite3_column_int(st, 2);
-        r.createdAt       = sqlite3_column_int64(st, 3);
-        r.lastActiveAt    = sqlite3_column_int64(st, 4);
-        r.activated       = sqlite3_column_int(st, 5) != 0;
+        r.maxParticipants  = sqlite3_column_int(st, 2);
+        r.createdAt        = sqlite3_column_int64(st, 3);
+        r.lastActiveAt     = sqlite3_column_int64(st, 4);
+        r.activated        = sqlite3_column_int(st, 5) != 0;
+        r.requiresPassword = sqlite3_column_int(st, 6) != 0;
         result = std::move(r);
     }
     sqlite3_finalize(st);

@@ -19,8 +19,11 @@ async function call(path, opts = {}) {
 }
 
 export const api = {
-    createRoom(name) {
-        return call('/api/rooms', { method: 'POST', body: { name } });
+    createRoom(name, requiresPassword) {
+        return call('/api/rooms', {
+            method: 'POST',
+            body: { name, requires_password: !!requiresPassword }
+        });
     },
     activateRoom(id, challenges) {
         return call(`/api/rooms/${encodeURIComponent(id)}/activate`,

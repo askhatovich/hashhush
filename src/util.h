@@ -30,6 +30,10 @@ std::string peerIdFromToken(const std::string& token);
 std::string base64Encode(const std::vector<std::uint8_t>& bytes);
 std::optional<std::vector<std::uint8_t>> base64Decode(const std::string& s);
 
+// Cryptographically-throwaway random byte buffer. Used by the WS layer to
+// fabricate a decoy challenge when no real one can be issued.
+std::vector<std::uint8_t> randomBytesVec(std::size_t n);
+
 // Constant-time byte compare.
 bool ctEqual(const std::vector<std::uint8_t>& a, const std::vector<std::uint8_t>& b);
 

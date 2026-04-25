@@ -58,6 +58,14 @@ int js_int(const crow::json::rvalue& v, const char* key, int def) {
     }
     return def;
 }
+bool js_bool(const crow::json::rvalue& v, const char* key, bool def) {
+    if (v.has(key)) {
+        const auto t = v[key].t();
+        if (t == crow::json::type::True)  return true;
+        if (t == crow::json::type::False) return false;
+    }
+    return def;
+}
 
 }  // namespace
 
@@ -119,6 +127,12 @@ void WebAPI::initRoutes() {
         }
         // Capacity is server-side policy — clients have no say in it.
         const int capacity = std::min(cfg.defaultMaxParticipants, cfg.maxParticipantsCap);
+        const bool requiresPassword = js_bool(body, "requires_password", false);
+        // Bigger challenge pool when a password gates the room. The pool also
+        // bounds password-guessing attempts (each wrong guess consumes one
+        // challenge), so a wider pool is the trade we accept for the extra
+        // security factor.
+        const int poolMultiplier = requiresPassword ? 10 : 5;
 
         if (cfg.totalRoomsCap > 0 && db.countRooms() >= cfg.totalRoomsCap) {
             return jsonError(503, "rooms_capacity_reached");
@@ -127,9 +141,10 @@ void WebAPI::initRoutes() {
         RoomRow r;
         r.id   = util::randomRoomId();
         r.name = name;
-        r.maxParticipants = capacity;
+        r.maxParticipants  = capacity;
         r.createdAt = r.lastActiveAt = util::nowSeconds();
-        r.activated = false;
+        r.activated        = false;
+        r.requiresPassword = requiresPassword;
         if (!db.createRoom(r)) {
             return jsonError(500, "db_create_failed");
         }
@@ -137,7 +152,8 @@ void WebAPI::initRoutes() {
         crow::json::wvalue out;
         out["room_id"]            = r.id;
         out["max_participants"]   = r.maxParticipants;
-        out["challenges_required"] = r.maxParticipants * 5;
+        out["challenges_required"] = r.maxParticipants * poolMultiplier;
+        out["requires_password"]   = r.requiresPassword;
         crow::response resp{out};
         resp.add_header("Content-Type", "application/json");
         return resp;
@@ -160,7 +176,7 @@ void WebAPI::initRoutes() {
         if (!body || !body.has("challenges") || body["challenges"].t() != crow::json::type::List) {
             return jsonError(400, "bad_json");
         }
-        const int required = roomOpt->maxParticipants * 5;
+        const int required = roomOpt->maxParticipants * (roomOpt->requiresPassword ? 10 : 5);
         const auto& arr = body["challenges"];
         if (static_cast<int>(arr.size()) != required) {
             return jsonError(400, "wrong_challenge_count");
@@ -293,23 +309,18 @@ void WebAPI::initRoutes() {
     // the upgrade succeeds, but any auth failure inside the protocol closes
     // the connection (see onmessage below).
     CROW_WEBSOCKET_ROUTE(app_, "/ws")
-        .onaccept([this](const crow::request& req, void** userdata) {
-            auto& db = db_;
+        .onaccept([](const crow::request& req, void** userdata) {
+            // Accept the upgrade for any non-empty room id, even if the
+            // room does not exist. All "room missing / wrong key / wrong
+            // token / pool empty" outcomes are then funnelled through the
+            // same in-protocol `invalid_key` close, so an attacker probing
+            // random room ids cannot enumerate which ones are real by
+            // observing the HTTP-upgrade response.
             const std::string roomId = req.url_params.get("room")
                 ? std::string(req.url_params.get("room"))
                 : "";
             if (roomId.empty()) {
                 return false;
-            }
-            const auto r = db.findRoom(roomId);
-            if (!r) {
-                return false;
-            }
-            if (auto* tok = req.url_params.get("token"); tok && *tok) {
-                const auto owner = db.roomForToken(tok);
-                if (!owner || *owner != roomId) {
-                    return false;
-                }
             }
             *userdata = new std::string(roomId);
             return true;
@@ -427,7 +438,10 @@ void WebAPI::initRoutes() {
 
             if (!peer->joined) {
                 if (type == "hello") {
-                    // Existing token path.
+                    // Existing token path. Any failure (token mismatch, room
+                    // gone) collapses into the generic invalid_key response
+                    // so the result is observationally identical to a wrong
+                    // key in the challenge flow.
                     const auto token = js_str(j, "token");
                     if (!token.empty()) {
                         const auto owner = db.roomForToken(token);
@@ -435,23 +449,32 @@ void WebAPI::initRoutes() {
                             finalizeJoin(token, /*isFresh=*/false);
                             return;
                         }
-                        sendErrAndClose("invalid_token");
+                        sendErrAndClose("invalid_key");
                         return;
                     }
-                    // No token → start the challenge flow. Capacity check is
-                    // a snapshot; a stricter audit happens on finalizeJoin.
-                    const int liveLimit = [&] {
-                        const auto rr = db.findRoom(peer->roomId);
-                        return rr ? rr->maxParticipants : 0;
-                    }();
-                    if (room.liveCount(peer->roomId) >= liveLimit) {
-                        sendErrAndClose("room_full");
-                        return;
+                    // No token → challenge flow. We send a challenge frame
+                    // unconditionally — a real one when the room exists and
+                    // can admit a peer, a random one otherwise. The joiner
+                    // can solve only the real case; everything else falls
+                    // through to invalid_key on response.
+                    const auto roomRow = db.findRoom(peer->roomId);
+                    const bool roomFull = roomRow
+                        && room.liveCount(peer->roomId) >= roomRow->maxParticipants;
+                    std::optional<ChallengePair> pair;
+                    if (roomRow && !roomFull) {
+                        pair = db.consumeChallenge(peer->roomId);
                     }
-                    const auto pair = db.consumeChallenge(peer->roomId);
                     if (!pair) {
-                        sendErrAndClose("challenges_exhausted");
-                        return;
+                        // Decoy challenge with random bytes. Designed never
+                        // to round-trip back to the stored expected value,
+                        // and timing-equivalent to consuming a real one so
+                        // the response is indistinguishable from the real
+                        // path to an enumeration-probing attacker.
+                        ChallengePair fake;
+                        fake.plaintextB64  = util::base64Encode(util::randomBytesVec(32));
+                        fake.ciphertextB64 = util::base64Encode(util::randomBytesVec(48));
+                        fake.nonceB64      = util::base64Encode(util::randomBytesVec(24));
+                        pair = std::move(fake);
                     }
                     peer->pendingToken      = util::randomTokenHex();
                     peer->expectedPlaintext = pair->plaintextB64;

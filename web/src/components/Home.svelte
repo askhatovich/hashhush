@@ -2,13 +2,14 @@
     import { t, lang } from '../lib/i18n.js';
     import { api } from '../lib/api.js';
     import { storage } from '../lib/storage.js';
-    import { generateKeySeed, deriveKey, encrypt, randomBytes, toB64 } from '../lib/crypto.js';
+    import { bytesToHex, deriveKey, encrypt, generateKeySeed, randomBytes, toB64 } from '../lib/crypto.js';
     import { randomNickname } from '../lib/words.js';
 
     let { initialError = null, appName = 'HashHush', info = null, onCreated } = $props();
 
     let nickname = $state(storage.getNickname() || randomNickname());
     let roomName = $state('');
+    let password = $state('');
     let busy = $state(false);
     let error = $state(initialError ? `errors.${initialError}` : null);
 
@@ -51,9 +52,13 @@
         busy = true;
         error = null;
         try {
-            const created = await api.createRoom(roomName.trim() || 'Secret chat');
+            const requiresPassword = password.length > 0;
+            const created = await api.createRoom(
+                roomName.trim() || 'Secret chat',
+                requiresPassword
+            );
             const seed = generateKeySeed();
-            const key = await deriveKey(seed);
+            const key = await deriveKey(seed, password);
 
             const challenges = [];
             for (let i = 0; i < created.challenges_required; ++i) {
@@ -66,6 +71,12 @@
                 });
             }
             await api.activateRoom(created.room_id, challenges);
+
+            // Cache the derived key so this browser can reload the room
+            // without asking for the password again. Drop the password
+            // itself from JS memory.
+            storage.saveRoomKey(created.room_id, bytesToHex(key));
+            password = '';
 
             // Don't persist the seed; it stays in the URL fragment only.
             // Path stays "/" — both room id and seed live in the fragment.
@@ -94,6 +105,18 @@
         <div class="field">
             <label for="nick">{$t('home.nickname')}</label>
             <input id="nick" type="text" bind:value={nickname} maxlength="40" />
+        </div>
+
+        <div class="field">
+            <label for="password">{$t('home.password_label')}</label>
+            <input
+                id="password"
+                type="password"
+                autocomplete="new-password"
+                placeholder={$t('home.password_placeholder')}
+                bind:value={password}
+            />
+            <p class="hint dim">{$t('home.password_hint')}</p>
         </div>
 
         {#if error}<p class="error">{$t(error)}</p>{/if}
@@ -173,6 +196,10 @@
         text-align: center;
         font-size: 12px;
         margin: 4px 0 0;
+    }
+    .hint {
+        font-size: 11px;
+        margin: 4px 2px 0;
     }
 
 

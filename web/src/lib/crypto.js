@@ -36,19 +36,41 @@ function concat(a, b) {
     return out;
 }
 
-// Triple-round salted SHA-256 producing the symmetric key.
+// Four-round salted SHA-256 producing the symmetric key.
 //   round 1: sha256("hash" || seed_utf8)
 //   round 2: sha256("hush" || round1)
 //   round 3: sha256("chat" || round2)
+//   round 4: sha256(password_utf8 || round3)
 // Salt is concatenated with the data as raw bytes — same on every client.
-export async function deriveKey(seed) {
+// `password` is an optional out-of-band shared secret; when omitted it is
+// the empty string, which still feeds the fourth round so the chain has a
+// single fixed shape regardless of password use.
+export async function deriveKey(seed, password = '') {
     await ready();
     const SALTS = ['hash', 'hush', 'chat'].map(s => ENCODER.encode(s));
     let acc = ENCODER.encode(seed);
     for (const salt of SALTS) {
         acc = sodium.crypto_hash_sha256(concat(salt, acc));
     }
+    acc = sodium.crypto_hash_sha256(concat(ENCODER.encode(password), acc));
     return acc;   // 32 bytes — XChaCha20-Poly1305 key.
+}
+
+// Hex helpers — used to persist a derived key in localStorage so a returning
+// peer can reload without re-prompting for the password.
+export function bytesToHex(bytes) {
+    return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+export function hexToBytes(hex) {
+    if (typeof hex !== 'string' || hex.length % 2 !== 0) return null;
+    const out = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < out.length; ++i) {
+        const v = parseInt(hex.substr(i * 2, 2), 16);
+        if (Number.isNaN(v)) return null;
+        out[i] = v;
+    }
+    return out;
 }
 
 export async function randomNonce() {

@@ -165,6 +165,10 @@ bool ctEqual(const std::vector<std::uint8_t>& a, const std::vector<std::uint8_t>
     return diff == 0;
 }
 
+std::vector<std::uint8_t> randomBytesVec(std::size_t n) {
+    return randomBytes(n);
+}
+
 std::int64_t nowSeconds() {
     return std::chrono::duration_cast<std::chrono::seconds>(
                std::chrono::system_clock::now().time_since_epoch())

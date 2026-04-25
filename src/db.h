@@ -19,6 +19,7 @@ struct RoomRow {
     std::int64_t createdAt = 0;
     std::int64_t lastActiveAt = 0;
     bool        activated = false;
+    bool        requiresPassword = false;
 };
 
 struct ChallengePair {

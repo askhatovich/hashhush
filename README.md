@@ -6,14 +6,23 @@ An ephemeral end-to-end encrypted group chat that runs from **a single self-cont
 
 The project is a different take on the same idea behind [niltalk](https://github.com/knadh/niltalk): unauthenticated, link-shared chat rooms with no account system. HashHush trades niltalk's session-cookie model for client-side end-to-end encryption, fragment-only key delivery, and a stable per-room identity derived from the access token, so privacy holds even against a fully compromised server.
 
+## Screenshots
+
+| Home | Chat |
+|------|------|
+| ![Home](docs/screenshots/home.png) | ![Chat](docs/screenshots/chat.png) |
+
 ## Features
 
 - **End-to-end encryption** with XChaCha20-Poly1305 (libsodium, in WebAssembly). The server only ever sees ciphertext.
 - **Encryption key never reaches the server.** The eight-character key seed lives in the URL fragment (`#`), which browsers do not transmit. The server only sees the bare `/` path on page load.
+- **Optional password.** A second secret, agreed out of band, can be required to join. The link alone is then insufficient — useful when the link travels through a less trusted channel than the password.
+- **Enumeration-resistant join.** "Room missing", "wrong key" and "wrong password" all produce the same WebSocket-level response, so an attacker cannot probe random room ids to discover which ones exist.
 - **Ephemeral rooms.** Rooms self-destruct on inactivity (default 24 hours since the last message) or when any participant deletes the room.
 - **No accounts.** A nickname is an optional label. Each participant has a stable in-room id derived from their access token, so identity survives reloads without persisting anything sensitive.
-- **One-time challenge pool** for first-time joiners. The room creator submits `5 * max_participants` `(plaintext, ciphertext, nonce)` triples encrypted under the room key. A new joiner has to decrypt one to be admitted; once consumed, a triple cannot be reused.
-- **Persistent access tokens.** After a successful first join, the server issues a token; the client stores it in `localStorage` and reuses it on reload to skip the challenge dance.
+- **One-time challenge pool** for first-time joiners. The room creator submits `(5 or 10) * max_participants` `(plaintext, ciphertext, nonce)` triples encrypted under the room key — `×10` when a password is required, `×5` otherwise. A new joiner has to decrypt one to be admitted; once consumed, a triple cannot be reused.
+- **Persistent access tokens and cached keys.** After a successful first join, the server issues a token and the client stores both the token and the validated key in `localStorage`. The password is wiped from memory the moment the key is derived, so reloads do not require re-entry.
+- **QR sharing.** A modal renders a QR of the invite link locally, no third-party request.
 - **Single-binary deployment.** The Svelte 5 frontend is bundled into one HTML file and embedded directly into the C++ executable.
 - **No HTTPS dependency.** All cryptography is performed locally in the browser via libsodium; the application works correctly over plain `http://`.
 
@@ -29,21 +38,22 @@ The path is always `/`. Both the room id and the key seed live in the URL fragme
 
 ### Room creation
 
-1. `POST /api/rooms { name }` creates an inactive room and returns `{ room_id, max_participants, challenges_required }`.
-2. The client generates a random eight-character seed, derives the symmetric key (see *Key derivation*) and produces `challenges_required` triples of the form `{ plaintext, ciphertext, nonce }`, where `ciphertext = AEAD_encrypt(key, nonce, plaintext)` and `plaintext` is 32 random bytes.
-3. `POST /api/rooms/{id}/activate { challenges }` uploads the triples. The server only stores the base64 blobs — it cannot decrypt any of them and never learns the key.
-4. The room becomes active. The browser's address bar is rewritten to `/#<roomId>:<seed>` so a reload re-derives the key locally.
+1. `POST /api/rooms { name, requires_password }` creates an inactive room and returns `{ room_id, max_participants, challenges_required }`. `challenges_required` is `5 * max_participants` for a link-only room and `10 * max_participants` when a password is set.
+2. The client generates a random eight-character seed, derives the symmetric key from `(seed, password)` (see *Key derivation*) and produces `challenges_required` triples of the form `{ plaintext, ciphertext, nonce }`, where `ciphertext = AEAD_encrypt(key, nonce, plaintext)` and `plaintext` is 32 random bytes.
+3. `POST /api/rooms/{id}/activate { challenges }` uploads the triples. The server only stores the base64 blobs — it cannot decrypt any of them and never learns the seed or the password.
+4. The room becomes active. The browser's address bar is rewritten to `/#<roomId>:<seed>` so a reload re-derives the key locally. The password, if any, is stored only as a cached key in `localStorage`; it is never transmitted and is wiped from JS memory after derivation.
 
 ### Joining
 
-A WebSocket is opened to `/ws?room=<id>` (optionally `&token=<t>` for a returning peer; an invalid token is rejected at the upgrade).
+A WebSocket is opened to `/ws?room=<id>` (optionally `&token=<t>` for a returning peer). The upgrade succeeds for any non-empty room id — even one that does not exist on the server — so that probing random ids cannot be used to enumerate live rooms.
 
-- **Returning peer with a stored token** sends `{ type: "hello", token }`. The server validates the token and replies with `{ type: "joined", peer_id, room_name, members, history }`.
-- **First-time peer** sends `{ type: "hello" }`. The server consumes one unused challenge from the pool and replies with `{ type: "challenge", ciphertext, nonce }`. The client decrypts and answers `{ type: "challenge_response", plaintext }`. On a match, the server issues a fresh access token and finalises the join.
+- **Returning peer with a stored token** sends `{ type: "hello", token }`. The server validates the token and replies with `{ type: "joined", peer_id, room_name, members, history }`. Any failure (token mismatch, room missing) closes the socket with the generic `invalid_key` code.
+- **First-time peer** sends `{ type: "hello" }`. The server replies with `{ type: "challenge", ciphertext, nonce }` — a real one if the room exists and has spare challenges, a random decoy otherwise. The client decrypts and answers `{ type: "challenge_response", plaintext }`. On a match, the server issues a fresh access token and finalises the join; on any mismatch it closes with `invalid_key`.
+- **Wrong password** is the same wire response as "wrong key" — the client distinguishes the two locally and prompts the user to retype the password.
 
 The peer id is the first 16 hex characters of `SHA-256(token)` — deterministic from the token, so the same browser tab gets the same id across reloads. Cached message history is annotated with the original sender's peer id, which lets a reconnected client recognise its own previous messages without involving the server.
 
-If the challenge pool is exhausted (a hard cap of `5 * max_participants` total successful joins over the room's lifetime), the WebSocket is closed with `challenges_exhausted`.
+If the room's challenge pool is exhausted (a hard cap of `5 *` or `10 * max_participants` total challenge-flow joins over its lifetime), the server returns the same decoy-challenge path, so the user sees a `wrong_password`-like result.
 
 ### Message flow
 
@@ -54,13 +64,16 @@ If the challenge pool is exhausted (a hard cap of `5 * max_participants` total s
 
 ### Key derivation
 
-Three SHA-256 rounds with literal salts, each concatenated as raw bytes with the previous round's output:
+Four SHA-256 rounds with literal salts, each concatenated as raw bytes with the previous round's output. The fourth round folds in the optional password — the empty string when no password is set, so the chain has a single fixed shape:
 
 ```
-k₀ = SHA-256("hash" ‖ seed_utf8)
-k₁ = SHA-256("hush" ‖ k₀)
-k₂ = SHA-256("chat" ‖ k₁)   // 32 bytes — XChaCha20-Poly1305 key
+k₀ = SHA-256("hash"       ‖ seed_utf8)
+k₁ = SHA-256("hush"       ‖ k₀)
+k₂ = SHA-256("chat"       ‖ k₁)
+k₃ = SHA-256(password_utf8 ‖ k₂)   // 32 bytes — XChaCha20-Poly1305 key
 ```
+
+A wrong password produces a wrong key; the resulting challenge response does not match, the server closes the connection with `invalid_key`, and the client prompts the user to try again.
 
 ### What the server stores
 
@@ -139,7 +152,7 @@ HashHush protects message **confidentiality and integrity** against:
 
 It does **not** protect against:
 
-- An attacker with the URL fragment (`#<roomId>:<seed>`). Anyone holding the link is a participant.
+- An attacker with the URL fragment (`#<roomId>:<seed>`) **and** the room password (if one was set). Anyone holding both factors is a participant.
 - A malicious participant of the same room — they have the key by definition.
 - An active network attacker who can replay a successful WebSocket join handshake against an unused challenge before the legitimate joiner does. They can occupy a slot but still cannot read messages.
 

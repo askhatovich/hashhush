@@ -2,12 +2,13 @@
     import { onMount, onDestroy, tick } from 'svelte';
     import { t } from '../lib/i18n.js';
     import { storage } from '../lib/storage.js';
-    import { deriveKey } from '../lib/crypto.js';
+    import { bytesToHex, deriveKey, hexToBytes } from '../lib/crypto.js';
     import { ChatClient } from '../lib/ws.js';
     import { api } from '../lib/api.js';
     import { buildJoinUrl } from '../lib/urlfrag.js';
     import { APP_NAME } from '../lib/brand.js';
     import DeleteSliderModal from './DeleteSliderModal.svelte';
+    import QrModal from './QrModal.svelte';
 
     let { roomId, seed, freshlyCreated = false, knownDeleted = false, onLeave } = $props();
 
@@ -27,10 +28,17 @@
     let listEl;
     let copied = $state(false);
     let showDeleteModal = $state(false);
+    let showQrModal = $state(false);
     let errorBanner = $state(null);
+    let needPassword = $state(false);
+    let passwordDraft = $state('');
+    let passwordError = $state(false);
+    let passwordBusy = $state(false);
     let reconnectTimer = null;
     let reconnectAttempt = 0;
     let unmounted = false;
+    let wakeLock = null;
+    let visibilityHandler = null;
 
     onMount(async () => {
         // App.svelte already probed the room via /api/is_alive on mount. If
@@ -42,9 +50,52 @@
             return;
         }
 
-        key = await deriveKey(seed);
+        // Prefer the cached final key if we have one — it survived being
+        // password-derived previously and lets the user skip the prompt.
+        const cachedKeyHex = storage.loadRoomKey(roomId);
+        if (cachedKeyHex) {
+            const bytes = hexToBytes(cachedKeyHex);
+            if (bytes) key = bytes;
+        }
+        if (!key) {
+            key = await deriveKey(seed, '');
+        }
         spawnClient(/*isInitial=*/true);
+        attachWakeLock();
     });
+
+    // Keep the screen on while a chat tab is in the foreground. The Wake
+    // Lock is auto-released by the browser when the tab becomes hidden, so
+    // we re-acquire it on visibilitychange.
+    function attachWakeLock() {
+        if (!('wakeLock' in navigator)) return;
+        const acquire = async () => {
+            if (wakeLock || document.visibilityState !== 'visible') return;
+            try {
+                wakeLock = await navigator.wakeLock.request('screen');
+                wakeLock.addEventListener('release', () => { wakeLock = null; });
+            } catch {
+                // User denied, feature unavailable, or the document was
+                // backgrounded between visibility check and request — ignore.
+            }
+        };
+        visibilityHandler = () => {
+            if (document.visibilityState === 'visible') acquire();
+        };
+        document.addEventListener('visibilitychange', visibilityHandler);
+        acquire();
+    }
+
+    async function releaseWakeLock() {
+        if (visibilityHandler) {
+            document.removeEventListener('visibilitychange', visibilityHandler);
+            visibilityHandler = null;
+        }
+        if (wakeLock) {
+            try { await wakeLock.release(); } catch { /* already released */ }
+            wakeLock = null;
+        }
+    }
 
     onDestroy(() => {
         unmounted = true;
@@ -53,6 +104,7 @@
             reconnectTimer = null;
         }
         if (client) client.close();
+        releaseWakeLock();
         document.title = APP_NAME;
     });
 
@@ -106,13 +158,21 @@
                 status = 'deleted';
             },
             onError: code => {
-                // Token no longer recognised by the server — typical when a
-                // peer comes back after the room was deleted and recreated,
-                // or after the server purged the room. Promote to deleted.
-                if (code === 'invalid_token') {
+                // The server collapses "room missing / wrong key / wrong
+                // password / token mismatch" all into invalid_key so the
+                // wire is enumeration-proof. We disambiguate locally:
+                //   - cached key/token failed → drop them, prompt password.
+                //   - first-time visitor failed empty-password attempt →
+                //     prompt for the room password.
+                if (code === 'invalid_key') {
                     cancelReconnect();
                     storage.forgetRoom(roomId);
-                    status = 'deleted';
+                    needPassword = true;
+                    // Show "wrong password" only if the user already
+                    // entered one and it was rejected.
+                    passwordError = passwordDraft.length > 0;
+                    passwordDraft = '';
+                    passwordBusy = false;
                     return;
                 }
                 // Browser fires a generic "network" error before close on
@@ -154,6 +214,25 @@
         reconnectTimer = setTimeout(tryReconnect, delay);
     }
 
+    async function submitPassword() {
+        if (passwordBusy) return;
+        if (passwordDraft.length === 0) {
+            passwordError = true;
+            return;
+        }
+        passwordBusy = true;
+        passwordError = false;
+        // Re-derive the key with the user-typed password, drop any stale
+        // client/timer, and try once more. The password itself is wiped
+        // from memory the moment we have a key.
+        key = await deriveKey(seed, passwordDraft);
+        passwordDraft = '';
+        if (client) client.close();
+        cancelReconnect();
+        needPassword = false;
+        spawnClient(/*isInitial=*/true);
+    }
+
     async function tryReconnect() {
         reconnectTimer = null;
         if (unmounted || status === 'deleted' || status === 'joined') return;
@@ -180,6 +259,12 @@
 
     async function handleJoined(info) {
         if (info.token) storage.saveRoomToken(roomId, info.token);
+        // Persist the now-validated key. Subsequent reloads will skip the
+        // password prompt entirely.
+        if (key) storage.saveRoomKey(roomId, bytesToHex(key));
+        needPassword = false;
+        passwordError = false;
+        passwordDraft = '';
         myPeerId = info.peerId;
         roomName = info.roomName || '';
         members = info.members;
@@ -320,49 +405,63 @@
         <div class="deleted-msg">{$t('chat.room_deleted')}</div>
         <button class="ghost" onclick={() => onLeave && onLeave()}>{$t('chat.back_home')}</button>
     </div>
+{:else if needPassword}
+    <div class="password-screen">
+        <h2>{$t('chat.password_required_title')}</h2>
+        <p class="dim">{$t('chat.password_required_body')}</p>
+        <input
+            type="password"
+            placeholder={$t('chat.password_input_placeholder')}
+            bind:value={passwordDraft}
+            onkeydown={(e) => { if (e.key === 'Enter') submitPassword(); }}
+            autofocus
+        />
+        {#if passwordError}<p class="error">{$t('chat.password_wrong')}</p>{/if}
+        <div class="row">
+            <button class="ghost" onclick={() => onLeave && onLeave()}>{$t('chat.back_home')}</button>
+            <button onclick={submitPassword} disabled={passwordBusy}>{$t('chat.password_submit')}</button>
+        </div>
+    </div>
 {:else}
+    <h2 class="room-title" title={roomName || roomId}>{roomName || roomId}</h2>
     <header class="bar">
         <button class="ghost back" onclick={() => onLeave && onLeave()} aria-label="back">←</button>
 
-        <button
-            class="hdr-toggle"
-            onclick={() => panelOpen = !panelOpen}
-            aria-expanded={panelOpen}
-            aria-controls="member-panel"
-        >
-            <div class="hdr-line">
-                {#if nickEditing}
-                    <input
-                        class="nick-input"
-                        type="text"
-                        bind:value={nickDraft}
-                        maxlength="40"
-                        autofocus
-                        onkeydown={onNickKey}
-                        onblur={commitNick}
-                        onclick={(e) => e.stopPropagation()}
-                    />
-                {:else}
-                    <span
-                        class="nick"
-                        role="button"
-                        tabindex="0"
-                        onclick={(e) => { e.stopPropagation(); startNickEdit(); }}
-                        onkeydown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); startNickEdit(); } }}
-                        title="Edit nickname"
-                    >{nickname}<span class="pencil" aria-hidden="true">✎</span></span>
-                {/if}
-                <span class="room-id dim">{roomName || `/r/${roomId}`}</span>
-                <span class="caret dim" class:open={panelOpen}>▾</span>
-            </div>
-            <div class="status dim">
-                {#if status === 'joined'}
-                    {members.length} · {$t('chat.members').toLowerCase()}
-                {:else}
+        <div class="bar-mid">
+            {#if nickEditing}
+                <input
+                    class="nick-input"
+                    type="text"
+                    bind:value={nickDraft}
+                    maxlength="40"
+                    autofocus
+                    onkeydown={onNickKey}
+                    onblur={commitNick}
+                />
+            {:else}
+                <span
+                    class="nick"
+                    role="button"
+                    tabindex="0"
+                    onclick={startNickEdit}
+                    onkeydown={(e) => { if (e.key === 'Enter') { startNickEdit(); } }}
+                    title="Edit nickname"
+                >{nickname}<span class="pencil" aria-hidden="true">✎</span></span>
+            {/if}
+            {#if status === 'joined'}
+                <button
+                    type="button"
+                    class="status-toggle dim"
+                    onclick={() => panelOpen = !panelOpen}
+                    aria-expanded={panelOpen}
+                    aria-controls="member-panel"
+                >{members.length} · {$t('chat.members').toLowerCase()}</button>
+            {:else}
+                <span class="status dim">
                     {$t(`chat.${status === 'lost' ? 'connection_lost' : status}`)}
-                {/if}
-            </div>
-        </button>
+                </span>
+            {/if}
+        </div>
 
         <button
             class="ghost copy-btn"
@@ -371,6 +470,12 @@
             title={copied ? $t('chat.copied') : $t('chat.copy_link')}
             aria-label={copied ? $t('chat.copied') : $t('chat.copy_link')}
         >🔗</button>
+        <button
+            class="ghost"
+            onclick={() => showQrModal = true}
+            title={$t('chat.show_qr')}
+            aria-label={$t('chat.show_qr')}
+        >▦</button>
         <button class="danger" onclick={() => showDeleteModal = true}>{$t('chat.delete')}</button>
     </header>
 
@@ -439,6 +544,10 @@
     />
 {/if}
 
+{#if showQrModal}
+    <QrModal url={buildJoinUrl(roomId, seed)} onClose={() => showQrModal = false} />
+{/if}
+
 <style>
     .chat {
         flex: 1;
@@ -446,77 +555,108 @@
         flex-direction: column;
         min-height: 0;
     }
+    .room-title {
+        font-size: 18px;
+        font-weight: 600;
+        line-height: 1.25;
+        margin: 0 0 8px;
+        padding: 0 4px;
+        /* Single line that grows ellipsis on long names — keeps the layout
+           predictable on narrow screens. */
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
     .bar {
         display: flex;
         align-items: center;
         gap: 8px;
-        padding-bottom: 12px;
+        padding: 4px 4px 12px;
         border-bottom: 1px solid var(--border);
         margin-bottom: 12px;
     }
     .bar .back { padding: 6px 10px; }
-    .bar .status { font-size: 12px; }
 
-    .hdr-toggle {
+    /* The participant count is the only element that opens the member
+       panel. Rendered as a button so hover/focus styling is scoped to it
+       alone — the rest of the header is plain markup. */
+    .status-toggle {
+        background: transparent;
+        border: 0;
+        padding: 2px 8px;
+        font: inherit;
+        font-size: 12px;
+        color: var(--text-dim);
+        cursor: pointer;
+        border-radius: 6px;
+    }
+    .status-toggle:hover { background: var(--bg-elev-2); color: var(--text); }
+    .status-toggle:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+    }
+
+    .bar-mid {
         flex: 1;
         min-width: 0;
         display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 2px;
-        background: transparent;
-        border: 0;
-        padding: 6px 8px;
-        text-align: left;
-        color: inherit;
-        cursor: pointer;
-        border-radius: var(--radius);
-    }
-    .hdr-toggle:hover { background: var(--bg-elev-2); }
-
-    .hdr-line {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        width: 100%;
-        font-size: 14px;
+        /* Nick and status default to a single inline row; if the row is too
+           narrow to hold both, the status wraps to a new line on its own.
+           A column-direction layout would stack them even with plenty of
+           room to spare. */
+        flex-direction: row;
         flex-wrap: wrap;
+        /* center, not baseline — fonts have different sizes (14px nick vs
+           12px status) and a baseline alignment makes the smaller text
+           ride visibly high on the line. */
+        align-items: center;
+        gap: 2px 10px;
+        padding: 0 4px;
     }
-    /* Narrow screens: stack the nick above the room name so they don't
-       collide. The caret stays on the first row, anchored right. */
-    @media (max-width: 540px) {
-        .hdr-line { gap: 2px 8px; }
-        .hdr-line .room-id {
-            flex-basis: 100%;
-            order: 3;
-        }
-        .hdr-line .caret { order: 2; }
-        .hdr-line .nick, .hdr-line .nick-input { order: 1; }
-    }
+    .bar-mid .status { font-size: 12px; }
+
     .nick {
+        align-self: flex-start;
+        max-width: 100%;
         font-weight: 600;
+        font-size: 14px;
         cursor: text;
         padding: 2px 6px;
         border-radius: 6px;
         display: inline-flex;
         align-items: center;
         gap: 4px;
+        /* Long nicks must not push the action buttons off-screen. */
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
     .nick:hover { background: var(--bg-elev-2); }
-    .pencil { font-size: 11px; opacity: 0.55; }
+    .pencil { font-size: 11px; opacity: 0.55; flex-shrink: 0; }
     .nick-input {
         font-weight: 600;
         padding: 2px 6px;
         width: auto;
         max-width: 240px;
     }
-    .room-id { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    .caret {
-        margin-left: auto;
-        transition: transform 0.16s ease;
-        font-size: 12px;
+
+    /* Narrow-screen layout: action buttons stay on one row, the nick + member
+       count drop to a row of their own below them. Keeps the buttons from
+       being squeezed off-screen by long nicknames or non-Latin labels. */
+    @media (max-width: 540px) {
+        .bar {
+            flex-wrap: wrap;
+            row-gap: 6px;
+        }
+        .bar .back     { order: 1; }
+        .bar .copy-btn { order: 2; margin-left: auto; }
+        .bar .danger   { order: 3; }
+        .bar-mid {
+            order: 4;
+            flex-basis: 100%;
+        }
     }
-    .caret.open { transform: rotate(180deg); }
 
     .member-panel {
         background: var(--bg-elev);
@@ -593,13 +733,46 @@
         color: var(--text-dim);
     }
 
+    .password-screen {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: center;
+        max-width: 360px;
+        margin: 0 auto;
+        gap: 12px;
+        padding: 16px;
+    }
+    .password-screen h2 { margin: 0; font-size: 18px; }
+    .password-screen p  { margin: 0; font-size: 14px; }
+    .password-screen .row {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-top: 4px;
+    }
+    .password-screen .error {
+        background: rgba(239, 102, 113, 0.08);
+        border: 1px solid rgba(239, 102, 113, 0.4);
+        color: var(--danger);
+        padding: 8px 10px;
+        border-radius: var(--radius);
+        margin: 0;
+        font-size: 13px;
+    }
+
     .msglist {
         flex: 1;
         /* min-height:0 is what unlocks scrolling for a flex child whose
            contents would otherwise push the parent past the viewport. */
         min-height: 0;
         overflow-y: auto;
-        overscroll-behavior: contain;
+        /* Default scroll-chaining (overscroll-behavior:auto) so that, once
+           the message list is at its top/bottom edge, further scroll input
+           bubbles to the page and reveals the footer below the chat-shell.
+           A "contain" value would trap the gesture and force the user to
+           hunt for a non-chat strip on touch devices. */
         /* Reserve a stable gutter so messages don't jump horizontally when
            the scrollbar appears/disappears. */
         scrollbar-gutter: stable;
@@ -677,6 +850,12 @@
         flex: 1;
         resize: none;
         max-height: 160px;
+    }
+    /* Placeholder text ("Введите сообщение и нажмите Enter") is too wide
+       for a one-row textarea on narrow phones and wraps mid-word, hiding
+       the trailing word. Shrink it just enough on small screens to fit. */
+    @media (max-width: 540px) {
+        .composer textarea::placeholder { font-size: 12px; }
     }
     .composer button {
         align-self: stretch;
