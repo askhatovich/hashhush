@@ -154,7 +154,7 @@ It does **not** protect against:
 
 - An attacker with the URL fragment (`#<roomId>:<seed>`) **and** the room password (if one was set). Anyone holding both factors is a participant.
 - A malicious participant of the same room — they have the key by definition.
-- An active network attacker who can replay a successful WebSocket join handshake against an unused challenge before the legitimate joiner does. They can occupy a slot but still cannot read messages.
+- An on-path attacker without TLS who can intercept WebSocket frames in real time. By relaying the legitimate user's `challenge_response.plaintext` to the server faster than the user does, they win the race for that challenge and receive a valid access token. The attacker still holds no key, so they cannot read live or cached messages — but they occupy a participant slot, are visible in the member list, can flood the channel with undecryptable garbage, and (since their access token is valid) can call `DELETE /api/rooms/{id}` to destroy the room. TLS in front of HashHush mitigates this entirely.
 
 ## License
 
