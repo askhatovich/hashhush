@@ -425,7 +425,11 @@
 {:else}
     <h2 class="room-title" title={roomName || roomId}>{roomName || roomId}</h2>
     <header class="bar">
-        <button class="ghost back" onclick={() => onLeave && onLeave()} aria-label="back">←</button>
+        <button class="icon-btn back" onclick={() => onLeave && onLeave()} aria-label="back">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M19 12H5"/><path d="m12 19-7-7 7-7"/>
+            </svg>
+        </button>
 
         <div class="bar-mid">
             {#if nickEditing}
@@ -464,18 +468,34 @@
         </div>
 
         <button
-            class="ghost copy-btn"
+            class="icon-btn copy-btn"
             class:copied
             onclick={copyLink}
             title={copied ? $t('chat.copied') : $t('chat.copy_link')}
             aria-label={copied ? $t('chat.copied') : $t('chat.copy_link')}
-        >🔗</button>
+        >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M9 17H7A5 5 0 0 1 7 7h2"/>
+                <path d="M15 7h2a5 5 0 0 1 0 10h-2"/>
+                <path d="M8 12h8"/>
+            </svg>
+        </button>
         <button
-            class="ghost"
+            class="icon-btn qr-btn"
             onclick={() => showQrModal = true}
             title={$t('chat.show_qr')}
             aria-label={$t('chat.show_qr')}
-        >▦</button>
+        >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3"  y="3"  width="7" height="7" rx="1"/>
+                <rect x="14" y="3"  width="7" height="7" rx="1"/>
+                <rect x="3"  y="14" width="7" height="7" rx="1"/>
+                <path d="M14 14h3v3"/>
+                <path d="M21 14v3"/>
+                <path d="M14 21h3"/>
+                <path d="M21 21h-3v-3"/>
+            </svg>
+        </button>
         <button class="danger" onclick={() => showDeleteModal = true}>{$t('chat.delete')}</button>
     </header>
 
@@ -576,7 +596,30 @@
         border-bottom: 1px solid var(--border);
         margin-bottom: 12px;
     }
-    .bar .back { padding: 6px 10px; }
+    /* The three header action buttons (back / copy / QR) share one button
+       shape and one icon style — square 36px ghost button, centred 18px
+       SVG glyph, stroke matches text colour. Kept off the generic .ghost
+       so the wide "Delete room" pill button is unaffected. */
+    .icon-btn {
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    }
+    .icon-btn:hover { background: var(--bg-elev-2); }
+    .icon-btn svg {
+        width: 18px;
+        height: 18px;
+        display: block;
+    }
 
     /* The participant count is the only element that opens the member
        panel. Rendered as a button so hover/focus styling is scoped to it
@@ -643,7 +686,10 @@
 
     /* Narrow-screen layout: action buttons stay on one row, the nick + member
        count drop to a row of their own below them. Keeps the buttons from
-       being squeezed off-screen by long nicknames or non-Latin labels. */
+       being squeezed off-screen by long nicknames or non-Latin labels. The
+       order is locked to match the wide-screen DOM order — back · copy · QR
+       · delete — so children with no explicit `order` (default 0) cannot
+       slip in front of the back button. */
     @media (max-width: 540px) {
         .bar {
             flex-wrap: wrap;
@@ -651,9 +697,10 @@
         }
         .bar .back     { order: 1; }
         .bar .copy-btn { order: 2; margin-left: auto; }
-        .bar .danger   { order: 3; }
+        .bar .qr-btn   { order: 3; }
+        .bar .danger   { order: 4; }
         .bar-mid {
-            order: 4;
+            order: 5;
             flex-basis: 100%;
         }
     }
@@ -719,10 +766,10 @@
         text-align: center;
         animation: fade-in 0.18s ease-out;
     }
-    /* The copy-link button keeps a fixed icon-only size; success is signalled
-       via a transient accent tint instead of swapping in a long text label. */
-    .copy-btn { transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease; }
-    .copy-btn.copied {
+    /* Success flash for the copy button; size and shape stay identical to
+       the rest of the icon row, only the colour changes. */
+    .icon-btn.copied,
+    .icon-btn.copied:hover {
         background: var(--accent);
         color: #0a1614;
         border-color: transparent;
