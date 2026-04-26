@@ -589,8 +589,6 @@
         display: flex;
         flex-direction: column;
         min-height: 0;
-        /* Positioning context for the absolute member panel below. */
-        position: relative;
     }
     .room-title {
         font-size: 18px;
@@ -723,20 +721,18 @@
     }
 
     .member-panel {
-        /* Float over the message list instead of pushing it down — opening
-           the panel must not reflow chat content or move the user's scroll
-           position. The panel has its own internal scroll for long lists. */
-        position: absolute;
-        left: 0;
-        right: 0;
-        z-index: 5;
-        max-height: 60%;
+        /* Sits below the header in normal document flow, between the bar
+           and the message list. A max-height + internal scroll keeps a
+           crowded room from squeezing the chat into nothing; closing the
+           panel returns the layout to its previous shape and msglist's
+           own scrollTop is preserved by the browser across the toggle. */
+        max-height: 40%;
         overflow-y: auto;
         background: var(--bg-elev);
         border: 1px solid var(--border);
         border-radius: var(--radius);
         padding: 10px 12px;
-        box-shadow: var(--shadow);
+        margin: -4px 0 12px;
         animation: fade-in 0.16s ease-out;
     }
     .panel-title {
