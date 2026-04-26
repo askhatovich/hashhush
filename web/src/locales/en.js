@@ -5,7 +5,7 @@ export const en = {
         room_name_placeholder: 'Secret chat',
         nickname: 'Nickname',
         password_label: 'Password (optional)',
-        password_placeholder: 'Leave empty for a link-only room',
+        password_placeholder: 'Optional',
         password_hint: 'A second secret to share out of band. Anyone with the link must enter it to join.',
         create: 'Create room',
         creating: 'Creating room…',

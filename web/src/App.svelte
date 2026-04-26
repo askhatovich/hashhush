@@ -20,6 +20,24 @@
 
         document.title = APP_NAME;
 
+        // Lock the chat area to the actual visual viewport. On mobile Chrome
+        // 100dvh grows and shrinks with the URL bar — the chat would breathe
+        // as the user scrolls. visualViewport.height also tracks the soft
+        // keyboard, so opening it shrinks the chat instead of pushing the
+        // composer below the fold.
+        const setChatHeight = () => {
+            const vp = window.visualViewport;
+            const h = vp ? vp.height : window.innerHeight;
+            document.documentElement.style.setProperty('--chat-h', `${h}px`);
+        };
+        setChatHeight();
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', setChatHeight);
+            window.visualViewport.addEventListener('scroll', setChatHeight);
+        } else {
+            window.addEventListener('resize', setChatHeight);
+        }
+
         await cryptoReady();
         cryptoLoaded = true;
 

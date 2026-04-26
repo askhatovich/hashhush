@@ -5,7 +5,7 @@ export const ru = {
         room_name_placeholder: 'Secret chat',
         nickname: 'Никнейм',
         password_label: 'Пароль (опционально)',
-        password_placeholder: 'Оставьте пустым — комната только по ссылке',
+        password_placeholder: 'Не обязательно',
         password_hint: 'Дополнительный секрет, который вы передадите участникам отдельным каналом. Все обладатели ссылки должны будут его ввести.',
         create: 'Создать комнату',
         creating: 'Создание комнаты…',

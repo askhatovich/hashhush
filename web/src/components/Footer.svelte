@@ -21,12 +21,14 @@
     <div class="left dim">
         <a href="https://github.com/askhatovich/hashhush" target="_blank" rel="noopener noreferrer">{APP_NAME}</a>
         <span class="mono">v{VERSION}</span>
-        {#if VERSION !== 'dev'}<span class="mono">({GIT_SHORT})</span>{/if}
+        {#if VERSION !== 'dev'}<span class="mono hash">({GIT_SHORT})</span>{/if}
         <span>© 2026</span>
     </div>
     <div class="right">
-        <button class="link" onclick={() => setLang('en')} class:active={$lang === 'en'}>EN</button>
-        <button class="link" onclick={() => setLang('ru')} class:active={$lang === 'ru'}>RU</button>
+        <div class="lang-group">
+            <button class="link" onclick={() => setLang('en')} class:active={$lang === 'en'}>EN</button>
+            <button class="link" onclick={() => setLang('ru')} class:active={$lang === 'ru'}>RU</button>
+        </div>
         <button class="link" onclick={toggleTheme} title={theme}>
             {theme === 'dark' ? '☾' : '☀'}
         </button>
@@ -44,13 +46,23 @@
         font-size: 12px;
     }
     .left { display: flex; gap: 8px; align-items: center; }
-    .right { display: flex; gap: 6px; }
+    .right { display: flex; gap: 8px; align-items: center; }
     .left a {
         color: var(--text);
         text-decoration: none;
         font-weight: 600;
     }
     .left a:hover { color: var(--accent); }
+
+    /* The two language toggles read as a single grouped control: the gap
+       between EN and RU is tighter than the gap to the theme toggle next
+       to them, so the trio reads as "[lang] [theme]". */
+    .lang-group { display: flex; gap: 0; }
+
+    /* Narrow screens: drop the (hash) chip so the footer stays on one row. */
+    @media (max-width: 540px) {
+        .hash { display: none; }
+    }
     button.link {
         background: transparent;
         color: var(--text-dim);

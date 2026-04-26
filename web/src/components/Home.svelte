@@ -131,10 +131,9 @@
             <li>{$t('home.info_max').replace('{count}', info.default_max_participants)}</li>
             <li>{$t('home.info_ttl').replace('{duration}', formatTtl(info.idle_ttl_seconds))}</li>
             <li>{$t('home.info_cache').replace('{count}', info.message_cache_size)}</li>
+            <li>{$t('home.privacy_note')}</li>
         </ul>
     {/if}
-
-    <p class="privacy dim">{$t('home.privacy_note')}</p>
 </section>
 
 <style>
@@ -192,14 +191,16 @@
         opacity: 0.55;
     }
 
-    .privacy {
-        text-align: center;
-        font-size: 12px;
-        margin: 4px 0 0;
-    }
     .hint {
         font-size: 11px;
         margin: 4px 2px 0;
+    }
+
+    /* Mirror the chat composer rule: at narrow widths the placeholder text
+       would wrap or clip; shrinking only the placeholder font (not the
+       typed value) keeps the field looking the same when filled. */
+    @media (max-width: 540px) {
+        .card input::placeholder { font-size: 12px; }
     }
 
 

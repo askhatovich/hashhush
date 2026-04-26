@@ -108,7 +108,10 @@ button.danger:hover { background: var(--danger-press); }
     padding-bottom: 0;
 }
 .app-shell.chat-mode > section.chat {
-    height: 100dvh;
+    /* Drives off the visual-viewport height set in App.svelte. Falls back to
+       100svh (the smallest dynamic viewport) so the chat does not balloon on
+       URL-bar collapse, even before JS attaches its listeners. */
+    height: var(--chat-h, 100svh);
     flex: none;
     padding: 12px 0;
 }

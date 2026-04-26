@@ -304,9 +304,10 @@
     }
     async function handleMessage(m) {
         if (m.peerId && m.nick) peerNicks = { ...peerNicks, [m.peerId]: m.nick };
+        const stick = m.fromSelf || isNearBottom();
         messages = [...messages, m];
         await tick();
-        scrollToBottom();
+        if (stick) scrollToBottom();
     }
 
     // System events (join/leave) are kept client-side only — the server's
@@ -314,6 +315,7 @@
     // The nickname is snapshotted into the event at creation time so it
     // survives the peerNicks map being trimmed when that peer leaves.
     async function appendSystemEvent(kind, peerId) {
+        const stick = isNearBottom();
         messages = [...messages, {
             system: true,
             kind,
@@ -322,9 +324,17 @@
             ts: Math.floor(Date.now() / 1000)
         }];
         await tick();
-        scrollToBottom();
+        if (stick) scrollToBottom();
     }
 
+    // Threshold inside which we consider the user "at the bottom" and pin
+    // them there on new messages. A bit of slack covers small overscroll
+    // bounces on mobile.
+    const STICKY_PX = 64;
+    function isNearBottom() {
+        if (!listEl) return true;
+        return listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < STICKY_PX;
+    }
     function scrollToBottom() {
         if (listEl) listEl.scrollTop = listEl.scrollHeight;
     }
@@ -552,7 +562,12 @@
                 onkeydown={onKey}
                 disabled={status !== 'joined'}
             ></textarea>
-            <button onclick={send} disabled={status !== 'joined' || !inputText.trim()}>↵</button>
+            <button class="send-btn" onclick={send} disabled={status !== 'joined' || !inputText.trim()} aria-label="send">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m22 2-7 20-4-9-9-4Z"/>
+                    <path d="M22 2 11 13"/>
+                </svg>
+            </button>
         </div>
 {/if}
 </section>
@@ -574,6 +589,8 @@
         display: flex;
         flex-direction: column;
         min-height: 0;
+        /* Positioning context for the absolute member panel below. */
+        position: relative;
     }
     .room-title {
         font-size: 18px;
@@ -706,11 +723,20 @@
     }
 
     .member-panel {
+        /* Float over the message list instead of pushing it down — opening
+           the panel must not reflow chat content or move the user's scroll
+           position. The panel has its own internal scroll for long lists. */
+        position: absolute;
+        left: 0;
+        right: 0;
+        z-index: 5;
+        max-height: 60%;
+        overflow-y: auto;
         background: var(--bg-elev);
         border: 1px solid var(--border);
         border-radius: var(--radius);
         padding: 10px 12px;
-        margin: -4px 0 12px;
+        box-shadow: var(--shadow);
         animation: fade-in 0.16s ease-out;
     }
     .panel-title {
@@ -904,8 +930,18 @@
     @media (max-width: 540px) {
         .composer textarea::placeholder { font-size: 12px; }
     }
-    .composer button {
+    .composer .send-btn {
         align-self: stretch;
-        padding: 0 16px;
+        width: 44px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    .composer .send-btn svg {
+        width: 18px;
+        height: 18px;
+        display: block;
     }
 </style>
