@@ -40,7 +40,23 @@
     let wakeLock = null;
     let visibilityHandler = null;
 
+    let viewportHandler = null;
+
     onMount(async () => {
+        // When the soft keyboard opens or rotates, the visualViewport shrinks
+        // and our --chat-h CSS variable updates — but the message list keeps
+        // its current scrollTop, which can leave the latest message hidden
+        // behind the new fold. Re-pin to the bottom on every viewport
+        // resize so the user always sees the freshest content.
+        if (window.visualViewport) {
+            viewportHandler = () => {
+                if (status === 'joined') {
+                    requestAnimationFrame(() => scrollToBottom());
+                }
+            };
+            window.visualViewport.addEventListener('resize', viewportHandler);
+        }
+
         // App.svelte already probed the room via /api/is_alive on mount. If
         // it told us the room is gone, jump straight to the deleted screen
         // and skip both key derivation and the WS connection attempt.
@@ -102,6 +118,10 @@
         if (reconnectTimer) {
             clearTimeout(reconnectTimer);
             reconnectTimer = null;
+        }
+        if (viewportHandler && window.visualViewport) {
+            window.visualViewport.removeEventListener('resize', viewportHandler);
+            viewportHandler = null;
         }
         if (client) client.close();
         releaseWakeLock();
@@ -272,8 +292,12 @@
         peerNicks = { ...peerNicks, [info.peerId]: nickname };
         messages = info.history;
         status = 'joined';
+        // The history may overflow the viewport; we want the latest replayed
+        // message in view, not the oldest. tick() flushes Svelte's DOM
+        // patches, but the browser still needs a frame to compute final
+        // sizes — rAF puts the scroll right after that.
         await tick();
-        scrollToBottom();
+        requestAnimationFrame(() => scrollToBottom());
     }
 
     function startNickEdit() {
@@ -304,10 +328,9 @@
     }
     async function handleMessage(m) {
         if (m.peerId && m.nick) peerNicks = { ...peerNicks, [m.peerId]: m.nick };
-        const stick = m.fromSelf || isNearBottom();
         messages = [...messages, m];
         await tick();
-        if (stick) scrollToBottom();
+        scrollToBottom();
     }
 
     // System events (join/leave) are kept client-side only — the server's
@@ -315,7 +338,6 @@
     // The nickname is snapshotted into the event at creation time so it
     // survives the peerNicks map being trimmed when that peer leaves.
     async function appendSystemEvent(kind, peerId) {
-        const stick = isNearBottom();
         messages = [...messages, {
             system: true,
             kind,
@@ -324,17 +346,9 @@
             ts: Math.floor(Date.now() / 1000)
         }];
         await tick();
-        if (stick) scrollToBottom();
+        scrollToBottom();
     }
 
-    // Threshold inside which we consider the user "at the bottom" and pin
-    // them there on new messages. A bit of slack covers small overscroll
-    // bounces on mobile.
-    const STICKY_PX = 64;
-    function isNearBottom() {
-        if (!listEl) return true;
-        return listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < STICKY_PX;
-    }
     function scrollToBottom() {
         if (listEl) listEl.scrollTop = listEl.scrollHeight;
     }

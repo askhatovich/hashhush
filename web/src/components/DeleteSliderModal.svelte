@@ -45,7 +45,7 @@
             <div class="fill" style="width: {value * 100}%"></div>
             <div
                 class="thumb"
-                style="left: calc({value * 100}% - 18px)"
+                style="left: calc(4px + {value} * (100% - 44px))"
                 onmousedown={start}
                 ontouchstart={start}
                 role="slider"
@@ -53,7 +53,12 @@
                 aria-valuemin="0"
                 aria-valuemax="1"
                 aria-valuenow={value}
-            >→</div>
+            >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M5 12h14"/>
+                    <path d="m12 5 7 7-7 7"/>
+                </svg>
+            </div>
             {#if value < 0.1}
                 <span class="hint dim">{$t('delete_modal.slide_to_confirm')}</span>
             {/if}
@@ -109,11 +114,18 @@
         background: var(--danger);
         color: #fff;
         display: flex; align-items: center; justify-content: center;
-        font-weight: bold;
         cursor: grab;
         transition: left 0.05s linear;
+        /* The travel range is calc(4px ... 100%-40px), so the thumb is fully
+           inside the track at both extremes — no half-clipped circle at
+           rest, no overshoot at the end. */
     }
     .thumb:active { cursor: grabbing; }
+    .thumb svg {
+        width: 18px;
+        height: 18px;
+        display: block;
+    }
     .hint {
         position: absolute; inset: 0;
         display: flex; align-items: center; justify-content: center;
