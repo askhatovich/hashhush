@@ -9,6 +9,7 @@ export const en = {
         password_hint: 'A second secret to share out of band. Anyone with the link must enter it to join.',
         create: 'Create room',
         creating: 'Creating room…',
+        solving_captcha: 'Verifying captcha…',
         privacy_note: 'The encryption key lives in the URL fragment (#) and is never sent to the server.',
         info_max: 'Up to {count} participants per room.',
         info_ttl: 'Rooms are deleted automatically after {duration} of inactivity.',
@@ -36,7 +37,7 @@ export const en = {
         members: 'Members',
         you: 'you',
         send_placeholder: 'Type a message and press Enter',
-        room_deleted: 'This room was deleted.',
+        room_deleted: 'This room was deleted',
         back_home: 'Back to home',
         connection_lost: 'Connection lost. Reconnecting…',
         sys_joined: '{nick} joined the chat',
@@ -60,6 +61,10 @@ export const en = {
         internal: 'Server error. Please retry.',
         network: 'Network error.',
         not_joined: 'Not authorised for this room.',
-        no_challenge: 'Authentication state lost. Please retry.'
+        no_challenge: 'Authentication state lost. Please retry.',
+        pow_required: 'Captcha required. Please retry.',
+        pow_invalid: 'Captcha verification failed. Please retry.',
+        pow_expired: 'Captcha expired. Please retry.',
+        pow_reused: 'Captcha already used. Please retry.'
     }
 };

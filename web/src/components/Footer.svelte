@@ -1,7 +1,7 @@
 <script>
     import { lang, t } from '../lib/i18n.js';
     import { storage } from '../lib/storage.js';
-    import { VERSION, GIT_SHORT } from '../version.js';
+    import { VERSION } from '../version.js';
 
     import { APP_NAME } from '../lib/brand.js';
     let theme = $state(storage.getTheme());
@@ -21,13 +21,12 @@
     <div class="left dim">
         <a href="https://github.com/askhatovich/hashhush" target="_blank" rel="noopener noreferrer">{APP_NAME}</a>
         <span class="mono">v{VERSION}</span>
-        {#if VERSION !== 'dev'}<span class="mono hash">({GIT_SHORT})</span>{/if}
-        <span>© 2026</span>
     </div>
     <div class="right">
         <div class="lang-group">
             <button class="link" onclick={() => setLang('en')} class:active={$lang === 'en'}>EN</button>
             <button class="link" onclick={() => setLang('ru')} class:active={$lang === 'ru'}>RU</button>
+            <button class="link" onclick={() => setLang('es')} class:active={$lang === 'es'}>ES</button>
         </div>
         <button class="link" onclick={toggleTheme} title={theme}>
             {theme === 'dark' ? '☾' : '☀'}
@@ -59,10 +58,6 @@
        to them, so the trio reads as "[lang] [theme]". */
     .lang-group { display: flex; gap: 0; }
 
-    /* Narrow screens: drop the (hash) chip so the footer stays on one row. */
-    @media (max-width: 540px) {
-        .hash { display: none; }
-    }
     button.link {
         background: transparent;
         color: var(--text-dim);

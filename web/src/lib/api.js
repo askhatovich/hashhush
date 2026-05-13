@@ -1,6 +1,8 @@
 // REST helpers. All endpoints return JSON.
 // On error responses: throws an Error with `code` and `status` properties.
 
+import { solvePoW } from './pow.js';
+
 async function call(path, opts = {}) {
     const res = await fetch(path, {
         method: opts.method || 'GET',
@@ -19,10 +21,21 @@ async function call(path, opts = {}) {
 }
 
 export const api = {
-    createRoom(name, requiresPassword) {
+    // `onPhase('solving_pow' | 'creating')` lets the UI swap the busy label
+    // mid-call. The PoW step runs entirely on the client; the server only
+    // sees the solved {challenge, nonce} pair.
+    async createRoom(name, requiresPassword, onPhase) {
+        onPhase?.('solving_pow');
+        const { challenge, difficulty } = await call('/api/pow_challenge');
+        const nonce = await solvePoW(challenge, difficulty);
+        onPhase?.('creating');
         return call('/api/rooms', {
             method: 'POST',
-            body: { name, requires_password: !!requiresPassword }
+            body: {
+                name,
+                requires_password: !!requiresPassword,
+                pow: { challenge, nonce }
+            }
         });
     },
     activateRoom(id, challenges) {

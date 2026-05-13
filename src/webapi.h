@@ -23,4 +23,6 @@ private:
     crow::SimpleApp app_;
     std::string  bundleEtag_;     // sha256-prefix of embedded HTML
     std::string  bundleHtml_;
+    std::string  infoBody_;       // pre-rendered /api/info JSON
+    std::string  infoEtag_;
 };

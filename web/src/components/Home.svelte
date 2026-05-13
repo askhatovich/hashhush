@@ -11,6 +11,10 @@
     let roomName = $state('');
     let password = $state('');
     let busy = $state(false);
+    // Sub-phase of the busy state. Empty when idle; otherwise one of
+    // 'solving_pow' | 'creating' | 'activating' so the button label can
+    // mirror what's actually happening.
+    let phase = $state('');
     let error = $state(initialError ? `errors.${initialError}` : null);
 
     $effect(() => { if (nickname) storage.setNickname(nickname); });
@@ -50,12 +54,14 @@
     async function create() {
         if (busy) return;
         busy = true;
+        phase = 'solving_pow';
         error = null;
         try {
             const requiresPassword = password.length > 0;
             const created = await api.createRoom(
                 roomName.trim() || 'Secret chat',
-                requiresPassword
+                requiresPassword,
+                p => { phase = p; }
             );
             const seed = generateKeySeed();
             const key = await deriveKey(seed, password);
@@ -86,7 +92,13 @@
             error = `errors.${e.code || 'internal'}`;
         } finally {
             busy = false;
+            phase = '';
         }
+    }
+
+    function busyLabel() {
+        if (phase === 'solving_pow') return $t('home.solving_captcha');
+        return $t('home.creating');
     }
 </script>
 
@@ -122,17 +134,25 @@
         {#if error}<p class="error">{$t(error)}</p>{/if}
 
         <button class="primary" onclick={create} disabled={busy}>
-            {busy ? $t('home.creating') : $t('home.create')}
+            {busy ? busyLabel() : $t('home.create')}
         </button>
     </div>
 
     {#if info}
         <ul class="policy dim">
-            <li>{$t('home.info_max').replace('{count}', info.default_max_participants)}</li>
+            <li>{$t('home.info_max').replace('{count}', info.max_participants)}</li>
             <li>{$t('home.info_ttl').replace('{duration}', formatTtl(info.idle_ttl_seconds))}</li>
             <li>{$t('home.info_cache').replace('{count}', info.message_cache_size)}</li>
             <li>{$t('home.privacy_note')}</li>
         </ul>
+    {/if}
+
+    {#if info?.admin_text}
+        <!-- Rendered as raw HTML. The value comes from the operator-controlled
+             server config; the operator already has full code execution on
+             this host, so trusting their markup adds no new attack surface.
+             Anyone with write access to config.ini gets the same trust. -->
+        <p class="admin-text dim">{@html info.admin_text}</p>
     {/if}
 </section>
 
@@ -189,6 +209,31 @@
         content: '·';
         margin-right: 6px;
         opacity: 0.55;
+    }
+
+    /* Operator-supplied free-form text. Same visual weight as .policy so
+       it reads as part of the server-info column, not as chrome. */
+    .admin-text {
+        margin: 0;
+        padding: 0 4px;
+        font-size: 12px;
+        line-height: 1.7;
+        white-space: pre-wrap;
+    }
+    /* Inherit the dim body colour and only highlight on hover, so links
+       sit inside the paragraph instead of glowing default-browser-blue
+       (which is unreadable on the dark theme). */
+    .admin-text :global(a) {
+        color: inherit;
+        text-decoration: underline;
+        text-decoration-color: var(--border);
+        text-underline-offset: 2px;
+        cursor: pointer;
+        transition: color 0.12s ease, text-decoration-color 0.12s ease;
+    }
+    .admin-text :global(a:hover) {
+        color: var(--accent);
+        text-decoration-color: var(--accent);
     }
 
     .hint {

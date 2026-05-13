@@ -137,10 +137,11 @@ See [`contrib/config.ini.example`](contrib/config.ini.example) for the full list
 
 - **`[server] app_name`** — brand shown on the home page heading. The footer link text is the constant `HashHush`.
 - **`[storage] db_path`** — SQLite file location.
-- **`[room] default_max_participants`** — capacity per room (default 10). The challenge pool size is `5 * max_participants`.
+- **`[room] max_participants`** — capacity per room (default 10). The challenge pool size is `5 * max_participants`.
 - **`[room] idle_ttl_seconds`** — how long since the last activity before a room is purged (default 86400).
 - **`[room] message_cache_size`** — size of the per-room replay buffer (default 5).
 - **`[room] ws_max_payload_bytes`** — maximum WebSocket payload size after base64 encoding.
+- **`[room] pow_difficulty_bits`** — leading zero bits a client must produce in a SHA-256 proof-of-work to create a room (default 16 ≈ 65k attempts, sub-second client-side; raise to throttle abuse).
 
 ## Threat model
 
@@ -159,8 +160,6 @@ It does **not** protect against:
 ## License
 
 [GPL-3.0-or-later](LICENSE)
-
-Author: Roman Lyubimov.
 
 ## Acknowledgements
 

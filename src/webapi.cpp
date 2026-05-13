@@ -3,6 +3,7 @@
 
 #include "webapi.h"
 
+#include "captcha.h"
 #include "config.h"
 #include "db.h"
 #include "generated_index_html.h"
@@ -21,11 +22,12 @@
 
 namespace {
 
-// Lightweight FNV-1a over the bundle. Cheap and good enough for an ETag —
-// any change to the embedded bytes flips it. Hex-encoded.
-std::string bundleEtagFor(const std::string& html) {
+// HTTP entity tag derived from the response body. Any byte change flips it;
+// the hash itself is FNV-1a, but callers only care that equal inputs map
+// to equal tags. Hex-encoded inside the quotes required by RFC 7232.
+std::string etagFor(const std::string& body) {
     std::uint64_t h = 0xcbf29ce484222325ULL;
-    for (unsigned char c : html) {
+    for (unsigned char c : body) {
         h ^= c;
         h *= 0x100000001b3ULL;
     }
@@ -72,7 +74,23 @@ bool js_bool(const crow::json::rvalue& v, const char* key, bool def) {
 WebAPI::WebAPI(Database& db, RoomManager& rooms)
     : db_(db), rooms_(rooms) {
     bundleHtml_ = getIndexHtml();
-    bundleEtag_ = bundleEtagFor(bundleHtml_);
+    bundleEtag_ = etagFor(bundleHtml_);
+
+    // /api/info content is derived from immutable startup config, so we
+    // serialize it once and serve the same bytes (with the same ETag)
+    // forever. A config reload would require a process restart anyway.
+    {
+        const auto& cfg = Config::instance();
+        crow::json::wvalue v;
+        v["app_name"]           = cfg.appName;
+        v["admin_text"]         = cfg.adminText;
+        v["max_participants"]   = cfg.maxParticipants;
+        v["idle_ttl_seconds"]   = cfg.idleTtlSeconds;
+        v["message_cache_size"] = cfg.messageCacheSize;
+        infoBody_ = v.dump();
+        infoEtag_ = etagFor(infoBody_);
+    }
+
     initRoutes();
 }
 
@@ -111,6 +129,21 @@ void WebAPI::initRoutes() {
     // so the server's HTTP layer sees no room-specific information here.
     CROW_ROUTE(app_, "/")(serveBundle);
 
+    // --- GET /api/pow_challenge — issue a stateless PoW challenge token. ---
+    // The client must solve `sha256(challenge || nonce)` to `difficulty`
+    // leading zero bits and submit `{challenge, nonce}` inside POST /api/rooms.
+    CROW_ROUTE(app_, "/api/pow_challenge")
+    ([](const crow::request&) {
+        const auto& cfg = Config::instance();
+        crow::json::wvalue v;
+        v["challenge"]  = captcha::issueChallenge();
+        v["difficulty"] = cfg.powDifficultyBits;
+        crow::response r{v};
+        r.add_header("Content-Type", "application/json");
+        r.add_header("Cache-Control", "no-store");
+        return r;
+    });
+
     // --- POST /api/rooms — create room, return required challenge count. ---
     CROW_ROUTE(app_, "/api/rooms").methods(crow::HTTPMethod::POST)
     ([this](const crow::request& req) {
@@ -121,12 +154,43 @@ void WebAPI::initRoutes() {
             return jsonError(400, "bad_json");
         }
 
+        // PoW captcha: block automated room creation. The proof must be
+        // present, well-formed, signed by this process's secret, unexpired,
+        // unreused, and meet the configured difficulty.
+        if (!body.has("pow") || body["pow"].t() != crow::json::type::Object) {
+            return jsonError(400, "pow_required");
+        }
+        const auto& powObj = body["pow"];
+        const std::string powChallenge = js_str(powObj, "challenge");
+        const std::string powNonce     = js_str(powObj, "nonce");
+        if (powChallenge.empty() || powNonce.empty()) {
+            return jsonError(400, "pow_required");
+        }
+        // Cheap upper bounds before we hash. A legitimate token is ~110
+        // bytes; a legitimate nonce is a short ASCII counter.
+        if (powChallenge.size() > 256 || powNonce.size() > 64) {
+            return jsonError(400, "pow_invalid");
+        }
+        switch (captcha::verifyChallenge(powChallenge, powNonce, cfg.powDifficultyBits)) {
+            case captcha::VerifyResult::Ok:
+                break;
+            case captcha::VerifyResult::Expired:
+                return jsonError(400, "pow_expired");
+            case captcha::VerifyResult::Reused:
+                return jsonError(400, "pow_reused");
+            case captcha::VerifyResult::Malformed:
+            case captcha::VerifyResult::BadHmac:
+            case captcha::VerifyResult::BadProof:
+            default:
+                return jsonError(400, "pow_invalid");
+        }
+
         auto name = js_str(body, "name", "Secret chat");
         if (name.size() > 80) {
             name.resize(80);
         }
         // Capacity is server-side policy — clients have no say in it.
-        const int capacity = std::min(cfg.defaultMaxParticipants, cfg.maxParticipantsCap);
+        const int capacity = std::min(cfg.maxParticipants, cfg.maxParticipantsCap);
         const bool requiresPassword = js_bool(body, "requires_password", false);
         // Bigger challenge pool when a password gates the room. The pool also
         // bounds password-guessing attempts (each wrong guess consumes one
@@ -278,16 +342,21 @@ void WebAPI::initRoutes() {
     });
 
     // --- GET /api/info — public configuration the home page renders. ---
+    // Body is precomputed in the constructor; we just serve the cached
+    // bytes and honour If-None-Match for cheap revalidation.
     CROW_ROUTE(app_, "/api/info")
-    ([](const crow::request&) {
-        const auto& cfg = Config::instance();
-        crow::json::wvalue v;
-        v["app_name"]                 = cfg.appName;
-        v["default_max_participants"] = cfg.defaultMaxParticipants;
-        v["idle_ttl_seconds"]         = cfg.idleTtlSeconds;
-        v["message_cache_size"]       = cfg.messageCacheSize;
-        crow::response r{v};
+    ([this](const crow::request& req) {
+        const auto inm = req.get_header_value("If-None-Match");
+        if (!inm.empty() && inm == infoEtag_) {
+            crow::response r304(304);
+            r304.add_header("ETag", infoEtag_);
+            r304.add_header("Cache-Control", "public, max-age=0, must-revalidate");
+            return r304;
+        }
+        crow::response r(infoBody_);
         r.add_header("Content-Type", "application/json");
+        r.add_header("ETag", infoEtag_);
+        r.add_header("Cache-Control", "public, max-age=0, must-revalidate");
         return r;
     });
 

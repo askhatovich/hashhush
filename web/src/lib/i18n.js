@@ -2,14 +2,26 @@ import { writable, derived } from 'svelte/store';
 import { storage } from './storage.js';
 import { en } from '../locales/en.js';
 import { ru } from '../locales/ru.js';
+import { es } from '../locales/es.js';
 
-const DICT = { en, ru };
+const DICT = { en, ru, es };
 
+// Walk navigator.languages in browser-preference order (the same order the
+// browser advertises in the Accept-Language header) and pick the first tag
+// whose primary subtag we ship a dictionary for. "es-419", "es-MX", "es" all
+// match "es"; we ignore the region.
 function detect() {
     const saved = storage.getLang();
     if (saved && DICT[saved]) return saved;
-    const browser = (navigator.language || 'en').slice(0, 2).toLowerCase();
-    return DICT[browser] ? browser : 'en';
+    const list = (navigator.languages && navigator.languages.length)
+        ? navigator.languages
+        : [navigator.language || 'en'];
+    for (const tag of list) {
+        if (!tag) continue;
+        const code = tag.slice(0, 2).toLowerCase();
+        if (DICT[code]) return code;
+    }
+    return 'en';
 }
 
 export const lang = writable(detect());

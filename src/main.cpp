@@ -1,6 +1,7 @@
 // Copyright (C) 2026 Roman Lyubimov
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "captcha.h"
 #include "config.h"
 #include "crowlib/crow/json.h"
 #include "db.h"
@@ -30,18 +31,24 @@ log_level = info
 bind_address = 0.0.0.0
 bind_port = 8080
 app_name = HashHush
+; Optional announcement shown on the home page below the server-info block.
+; Leave empty to hide the panel. Rendered as raw HTML — links via <a>, line
+; breaks via <br>, etc. Treat this file as trusted; anyone who can edit it
+; can run arbitrary JS in visitors' browsers.
+admin_text =
 
 [storage]
 db_path = /var/lib/hashhush/hashhush.sqlite
 
 [room]
-default_max_participants = 10
+max_participants = 10
 max_participants_cap = 50
 idle_ttl_seconds = 86400
 total_rooms_cap = 0
 message_cache_size = 5
 ws_max_payload_bytes = 8192
 challenge_max_blob_bytes = 256
+pow_difficulty_bits = 16
 )INI";
 
 void printHelp(const char* prog) {
@@ -165,6 +172,8 @@ int main(int argc, char** argv) {
         std::cerr << "Database error: " << e.what() << "\n";
         return 1;
     }
+
+    captcha::init();
 
     RoomManager rooms(*db);
     WebAPI api(*db, rooms);

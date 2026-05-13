@@ -50,6 +50,7 @@ find_package(SQLite3 REQUIRED)
 
 add_executable(hashhush
     main.cpp
+    captcha.cpp
     config.cpp
     db.cpp
     room.cpp
@@ -65,7 +66,12 @@ target_include_directories(hashhush PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-target_compile_definitions(hashhush PRIVATE CROW_ENFORCE_WS_SPEC)
+target_compile_definitions(hashhush PRIVATE
+    CROW_ENFORCE_WS_SPEC
+    # inih's default 200-byte line buffer truncates long UTF-8 admin_text
+    # mid-character. 4096 bytes is enough for any realistic operator notice.
+    INI_MAX_LINE=4096
+)
 
 target_link_libraries(hashhush PRIVATE
     SQLite::SQLite3

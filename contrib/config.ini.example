@@ -5,6 +5,12 @@ bind_address = 0.0.0.0
 bind_port = 8080
 ; Brand name shown on the home page heading and in the footer link.
 app_name = HashHush
+; Optional announcement rendered on the home page below the server-info
+; block (capacity, TTL, cache size). Leave empty to hide the panel.
+; Rendered as raw HTML, so links via <a href="...">…</a>, line breaks via
+; <br>, etc. are honoured. Anyone with write access to this file can inject
+; arbitrary HTML/JS into the home page — keep it locked down accordingly.
+admin_text =
 
 [storage]
 ; Path to the SQLite database file.
@@ -12,7 +18,7 @@ db_path = /var/lib/hashhush/hashhush.sqlite
 
 [room]
 ; Default and absolute upper bound for max participants per room.
-default_max_participants = 10
+max_participants = 10
 max_participants_cap = 50
 ; Idle TTL — a room with no activity for this many seconds is purged.
 idle_ttl_seconds = 86400
@@ -24,3 +30,7 @@ message_cache_size = 5
 ws_max_payload_bytes = 8192
 ; Maximum challenge plaintext / ciphertext size (bytes).
 challenge_max_blob_bytes = 256
+; Proof-of-work difficulty (leading zero bits) required to create a room.
+; 16 bits ≈ 65k SHA-256 attempts (sub-second on any device, real friction
+; for bots). Raise this if you see abusive automated room creation.
+pow_difficulty_bits = 16
